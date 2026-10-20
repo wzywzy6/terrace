@@ -919,16 +919,16 @@ extern "C" void control_task()
 GimbalData rm_motor_data_x;
 GimbalData rm_motor_data_y;
 extern sp::Mahony imu;
-
-static constexpr float kPitchVelFf = 2.0f;
+/*前馈增益*/
+static constexpr float kPitchVelFf = 2.0f;	//参考速度放大多少倍
 static constexpr float kYawVelFf = 0.0f;
-static constexpr float kPitchAccFf = 0.0f;
+static constexpr float kPitchAccFf = 0.0f;	//参考加速度要乘多大惯量变成力矩 kg*m^2
 static constexpr float kYawAccFf = 0.0f;
 
-static constexpr float kPitchBias = -4.00f;
+static constexpr float kPitchBias = -4.00f;	 //绝对目标角 rad
 static constexpr float kYawBias = 0.0f;
 
-static constexpr float kPitchSign = 1.0f;
+static constexpr float kPitchSign = 1.0f;  //方向标定（电机与机构正方向比例）
 static constexpr float kYawSign = 1.0f;
 
 /* ===== 新增:进入 MID 后先保持的时长 ===== */
@@ -965,12 +965,12 @@ extern "C" void control_task()
 			}
 			// const uint32_t elapsed_ms = pdTICKS_TO_MS(now_tick - mid_enter_tick);   // 删
 			const uint32_t elapsed_ms =
-				static_cast<uint32_t>(now_tick - mid_enter_tick);  // tick==ms @1kHz
+				static_cast<uint32_t>(now_tick - mid_enter_tick);  // tick==ms @1kHz 现在时间
 			const bool startup_hold = (elapsed_ms < kStartupHoldMs);
-			/* 保持期内:轨迹贡献为 0,只保留初始位置 */
-			const float pitch_traj_pos = startup_hold ? 0.0f : traj.pitch;
-			const float pitch_traj_vel = startup_hold ? 0.0f : traj.pitch_vel;
-			const float pitch_traj_acc = startup_hold ? 0.0f : traj.pitch_acc;
+			/* 保持期内:轨迹贡献为 0,只保留初始位置 需要的轨迹*/
+			const float pitch_traj_pos = startup_hold ? 0.0f : traj.pitch;		//参考角度偏移
+			const float pitch_traj_vel = startup_hold ? 0.0f : traj.pitch_vel;	//参考角速度
+			const float pitch_traj_acc = startup_hold ? 0.0f : traj.pitch_acc;	//参考角加速度
 			const float yaw_traj_pos = startup_hold ? 0.0f : traj.yaw;
 			const float yaw_traj_vel = startup_hold ? 0.0f : traj.yaw_vel;
 			const float yaw_traj_acc = startup_hold ? 0.0f : traj.yaw_acc;
