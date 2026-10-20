@@ -919,10 +919,17 @@ extern "C" void control_task()
 GimbalData rm_motor_data_x;
 GimbalData rm_motor_data_y;
 extern sp::Mahony imu;
+<<<<<<< HEAD
 /*前馈增益*/
 static constexpr float kPitchVelFf = 2.0f;	//参考速度放大多少倍
 static constexpr float kYawVelFf = 0.0f;
 static constexpr float kPitchAccFf = 0.0f;	//参考加速度要乘多大惯量变成力矩 kg*m^2
+=======
+
+static constexpr float kPitchVelFf = 2.35f;
+static constexpr float kYawVelFf = 0.0f;
+static constexpr float kPitchAccFf = 0.0025f;
+>>>>>>> bda8a53d1697a2f05285230c36934d2e824db6e9
 static constexpr float kYawAccFf = 0.0f;
 
 static constexpr float kPitchBias = -4.00f;	 //绝对目标角 rad
@@ -934,8 +941,8 @@ static constexpr float kYawSign = 1.0f;
 /* ===== 新增:进入 MID 后先保持的时长 ===== */
 static constexpr uint32_t kStartupHoldMs = 500U;
 
-sp::PID rm_motor_pid_angle_x(0.001f, 28.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
-sp::PID rm_motor_pid_speed_x(0.001f, 0.06f, 0.02f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+sp::PID rm_motor_pid_angle_x(0.001f, 28.0f, 0.1f, 1.0f, 50.0f, 5.0f, 1.0f, true, true);
+sp::PID rm_motor_pid_speed_x(0.001f, 0.06f, 0.01f, 0.0f, 0.5f, 0.5f, 1.0f, false, true);
 sp::PID rm_motor_pid_angle_y(0.001f, 50.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
 sp::PID rm_motor_pid_speed_y(0.001f, 0.007f, 0.01f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
 
@@ -984,12 +991,12 @@ extern "C" void control_task()
 			rm_motor_pid_speed_x.calc(pitch_vel_ref, rm_motor_x.speed);
 
 			float ffm_x = 0.0f;
-			if (fabsf(rm_motor_pid_speed_x.out) > 0.5f) {
-				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.05f;
+			if (fabsf(rm_motor_pid_speed_x.out) > 1.0f) {
+				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
 			}
 
 			rm_motor_data_x.given_torque = rm_motor_pid_speed_x.out +
-										   (-0.26f) * cosf(0.30f - imu.roll) + ffm_x +
+										   (-0.10f) * cosf(0.0f - imu.roll) + ffm_x +
 										   kPitchAccFf * kPitchSign * pitch_traj_acc;
 
 			/* ---------- Y 轴(yaw) ---------- */
@@ -1008,6 +1015,10 @@ extern "C" void control_task()
 			mid_active = false; /* 退出 MID,下次进入重新计时 */
 			rm_motor_data_x.given_torque = 0.0f;
 			rm_motor_data_y.given_torque = 0.0f;
+			rm_motor_pid_angle_x.clear();
+			rm_motor_pid_speed_x.clear();
+			rm_motor_pid_angle_y.clear();
+			rm_motor_pid_speed_y.clear();
 		}
 
 		rm_motor_x.cmd(rm_motor_data_x.given_torque);
