@@ -835,7 +835,7 @@ extern "C" void control_task()
 		osDelay(1);
 	}
 }*/
-#include "control_task.hpp"
+/*#include "control_task.hpp"
 
 #include "cmsis_os.h"
 #include "data_interfaces/can/can.hpp"
@@ -851,7 +851,7 @@ extern sp::Mahony imu;
 //                           dt     kp    ki    kd    mo   mio   alpha  ang? dynamic?
 // 电机 X 的两环 PID
 sp::PID rm_motor_pid_angle_x(0.001f, 28.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
-sp::PID rm_motor_pid_speed_x(0.001f, 0.02f, 0.01f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+sp::PID rm_motor_pid_speed_x(0.001f, 0.06f, 0.02f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
 
 // 电机 Y 的两环 PID
 sp::PID rm_motor_pid_angle_y(0.001f, 50.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
@@ -865,7 +865,7 @@ extern "C" void control_task()
 	osDelay(100);
 
 	// 初始化
-	rm_motor_data_x.target_angle_set = -4.3f;
+	rm_motor_data_x.target_angle_set = -3.65f;
 	rm_motor_data_x.target_speed_set = 0.0f;
 	rm_motor_data_x.given_torque = 0.0f;
 	rm_motor_data_y.target_angle_set = 0.0f;
@@ -884,7 +884,7 @@ extern "C" void control_task()
 
 			float ffm_x = 0.0f;
 			if (fabsf(rm_motor_pid_speed_x.out) > 0.5f) {  // 目标速度够大才补偿
-				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.08f;
+				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.05f;
 			}
 
 			rm_motor_data_x.given_torque =
@@ -898,6 +898,120 @@ extern "C" void control_task()
 		}
 
 		rm_motor_x.cmd(rm_motor_data_x.given_torque);
+		send_rm_motor();
+		osDelay(1);
+	}
+}*/
+#include "control_task.hpp"
+
+#include <math.h>
+
+#include "FreeRTOS.h"
+#include "cmsis_os.h"
+#include "data_interfaces/can/can.hpp"
+#include "data_interfaces/uart/uart.hpp"
+#include "io/bmi088/bmi088.hpp"
+#include "task.h"
+#include "tools/mahony/mahony.hpp"
+#include "tools/pid/pid.hpp"
+#include "trajectory_task.hpp"
+
+GimbalData rm_motor_data_x;
+GimbalData rm_motor_data_y;
+extern sp::Mahony imu;
+
+static constexpr float kPitchVelFf = 2.0f;
+static constexpr float kYawVelFf = 0.0f;
+static constexpr float kPitchAccFf = 0.0f;
+static constexpr float kYawAccFf = 0.0f;
+
+static constexpr float kPitchBias = -4.00f;
+static constexpr float kYawBias = 0.0f;
+
+static constexpr float kPitchSign = 1.0f;
+static constexpr float kYawSign = 1.0f;
+
+/* ===== 新增:进入 MID 后先保持的时长 ===== */
+static constexpr uint32_t kStartupHoldMs = 500U;
+
+sp::PID rm_motor_pid_angle_x(0.001f, 28.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
+sp::PID rm_motor_pid_speed_x(0.001f, 0.06f, 0.02f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+sp::PID rm_motor_pid_angle_y(0.001f, 50.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
+sp::PID rm_motor_pid_speed_y(0.001f, 0.007f, 0.01f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+
+extern "C" void control_task()
+{
+	remote.request();
+	osDelay(100);
+	can_start();
+	osDelay(100);
+
+	rm_motor_data_x.given_torque = 0.0f;
+	rm_motor_data_y.given_torque = 0.0f;
+
+	/* ===== 新增:进入 MID 时刻与状态 ===== */
+	TickType_t mid_enter_tick = 0;
+	bool mid_active = false;
+
+	while (true) {
+		TrajectoryPoint traj = trajectory_read();
+
+		if (remote.sw_r == sp::DBusSwitchMode::MID) {
+			/* ===== 新增:首次进入 MID 记录时刻 ===== */
+			const TickType_t now_tick = xTaskGetTickCount();
+			if (!mid_active) {
+				mid_enter_tick = now_tick;
+				mid_active = true;
+			}
+			// const uint32_t elapsed_ms = pdTICKS_TO_MS(now_tick - mid_enter_tick);   // 删
+			const uint32_t elapsed_ms =
+				static_cast<uint32_t>(now_tick - mid_enter_tick);  // tick==ms @1kHz
+			const bool startup_hold = (elapsed_ms < kStartupHoldMs);
+			/* 保持期内:轨迹贡献为 0,只保留初始位置 */
+			const float pitch_traj_pos = startup_hold ? 0.0f : traj.pitch;
+			const float pitch_traj_vel = startup_hold ? 0.0f : traj.pitch_vel;
+			const float pitch_traj_acc = startup_hold ? 0.0f : traj.pitch_acc;
+			const float yaw_traj_pos = startup_hold ? 0.0f : traj.yaw;
+			const float yaw_traj_vel = startup_hold ? 0.0f : traj.yaw_vel;
+			const float yaw_traj_acc = startup_hold ? 0.0f : traj.yaw_acc;
+
+			/* ---------- X 轴(pitch) ---------- */
+			const float pitch_target = kPitchBias + kPitchSign * pitch_traj_pos;
+
+			rm_motor_pid_angle_x.calc(pitch_target, rm_motor_x.angle);
+			const float pitch_vel_ref =
+				rm_motor_pid_angle_x.out + kPitchVelFf * kPitchSign * pitch_traj_vel;
+			rm_motor_pid_speed_x.calc(pitch_vel_ref, rm_motor_x.speed);
+
+			float ffm_x = 0.0f;
+			if (fabsf(rm_motor_pid_speed_x.out) > 0.5f) {
+				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.05f;
+			}
+
+			rm_motor_data_x.given_torque = rm_motor_pid_speed_x.out +
+										   (-0.26f) * cosf(0.30f - imu.roll) + ffm_x +
+										   kPitchAccFf * kPitchSign * pitch_traj_acc;
+
+			/* ---------- Y 轴(yaw) ---------- */
+			/*const float yaw_target = kYawBias + kYawSign * yaw_traj_pos;
+
+            rm_motor_pid_angle_y.calc(yaw_target, rm_motor_y.angle);
+            const float yaw_vel_ref =
+                rm_motor_pid_angle_y.out + kYawVelFf * kYawSign * yaw_traj_vel;
+            rm_motor_pid_speed_y.calc(yaw_vel_ref, rm_motor_y.speed);
+
+            rm_motor_data_y.given_torque =
+                rm_motor_pid_speed_y.out
+                + kYawAccFf * kYawSign * yaw_traj_acc;*/
+		}
+		else {
+			mid_active = false; /* 退出 MID,下次进入重新计时 */
+			rm_motor_data_x.given_torque = 0.0f;
+			rm_motor_data_y.given_torque = 0.0f;
+		}
+
+		rm_motor_x.cmd(rm_motor_data_x.given_torque);
+		rm_motor_y.cmd(rm_motor_data_y.given_torque);
 		send_rm_motor();
 		osDelay(1);
 	}

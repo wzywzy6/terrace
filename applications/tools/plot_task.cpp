@@ -5,6 +5,7 @@
 #include "tools/mahony/mahony.hpp"	// ← 如果还没 include
 
 extern sp::Mahony imu;	// ← 声明外部对象
+extern volatile float pitch;
 
 sp::Plotter plotter(&huart1);
 
@@ -15,7 +16,7 @@ extern "C" void plot_task()
 			/*rm_motor_x.angle,
       rm_motor_x.speed,
       rm_motor_x.torque,*/
-			rm_motor_x.angle, imu.yaw, imu.pitch, imu.roll
+			pitch - 0.35 /*+ 2.283f*/, imu.roll
 			//sw_to_float(remote.sw_r)
 		);
 

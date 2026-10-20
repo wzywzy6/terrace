@@ -53,6 +53,7 @@ osThreadId buzzerTaskHandle;
 osThreadId plotTaskHandle;
 osThreadId controlTaskHandle;
 osThreadId myTask06Handle;
+osThreadId myTask07Handle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -65,6 +66,7 @@ extern void buzzer_task(void const * argument);
 extern void plot_task(void const * argument);
 extern void control_task(void const * argument);
 extern void imu_task(void const * argument);
+extern void trajectory_task(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -135,6 +137,10 @@ void MX_FREERTOS_Init(void) {
   /* definition and creation of myTask06 */
   osThreadDef(myTask06, imu_task, osPriorityNormal, 0, 128);
   myTask06Handle = osThreadCreate(osThread(myTask06), NULL);
+
+  /* definition and creation of myTask07 */
+  osThreadDef(myTask07, trajectory_task, osPriorityIdle, 0, 128);
+  myTask07Handle = osThreadCreate(osThread(myTask07), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
