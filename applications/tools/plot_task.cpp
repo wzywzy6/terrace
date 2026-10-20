@@ -7,35 +7,17 @@
 extern sp::Mahony imu;	// ← 声明外部对象
 
 sp::Plotter plotter(&huart1);
-/*static float sw_to_float(sp::DBusSwitchMode sw)
-{
-	switch (sw) {
-		case sp::DBusSwitchMode::UP:
-			return 1.0f;
-		case sp::DBusSwitchMode::MID:
-			return 0.0f;
-		case sp::DBusSwitchMode::DOWN:
-			return -1.0f;
-		default:
-			return -2.0f;
-	}
-}*/
 
-// clang-format off
 extern "C" void plot_task()
 {
-  
 	while (1) {
-
-    plotter.plot(
-      /*rm_motor_x.angle,
+		plotter.plot(
+			/*rm_motor_x.angle,
       rm_motor_x.speed,
       rm_motor_x.torque,*/
-      imu.yaw,
-      imu.pitch,
-      imu.roll
-      //sw_to_float(remote.sw_r)
-	);
+			rm_motor_x.angle, imu.yaw, imu.pitch, imu.roll
+			//sw_to_float(remote.sw_r)
+		);
 
 		osDelay(5);
 	}

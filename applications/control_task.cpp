@@ -567,7 +567,7 @@ extern "C" void control_task()
 		osDelay(1);
 	}
 }*/
-#include "control_task.hpp"
+/*#include "control_task.hpp"
 
 #include "cmsis_os.h"
 #include "data_interfaces/can/can.hpp"
@@ -832,6 +832,73 @@ extern "C" void control_task()
 
 		send_rm_motor();
 		last_sw_r = remote.sw_r;
+		osDelay(1);
+	}
+}*/
+#include "control_task.hpp"
+
+#include "cmsis_os.h"
+#include "data_interfaces/can/can.hpp"
+#include "data_interfaces/uart/uart.hpp"
+#include "io/bmi088/bmi088.hpp"
+#include "tools/mahony/mahony.hpp"
+#include "tools/pid/pid.hpp"
+
+GimbalData rm_motor_data_x;
+GimbalData rm_motor_data_y;
+extern sp::Mahony imu;
+
+//                           dt     kp    ki    kd    mo   mio   alpha  ang? dynamic?
+// 电机 X 的两环 PID
+sp::PID rm_motor_pid_angle_x(0.001f, 28.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
+sp::PID rm_motor_pid_speed_x(0.001f, 0.02f, 0.01f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+
+// 电机 Y 的两环 PID
+sp::PID rm_motor_pid_angle_y(0.001f, 50.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
+sp::PID rm_motor_pid_speed_y(0.001f, 0.007f, 0.01f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+extern "C" void control_task()
+{
+	remote.request();
+
+	osDelay(100);
+	can_start();
+	osDelay(100);
+
+	// 初始化
+	rm_motor_data_x.target_angle_set = -4.3f;
+	rm_motor_data_x.target_speed_set = 0.0f;
+	rm_motor_data_x.given_torque = 0.0f;
+	rm_motor_data_y.target_angle_set = 0.0f;
+	rm_motor_data_y.target_speed_set = 0.0f;
+	rm_motor_data_y.given_torque = 0.0f;
+	while (true) {
+		if (remote.sw_r == sp::DBusSwitchMode::MID) {
+			// 单速度环pid
+			//rm_motor_pid_speed.calc(rm_motor_data_x.target_speed_set, rm_motor_x.speed);
+			//rm_motor_data_x.given_torque = rm_motor_pid_speed_x.out + ff;
+
+			//双环pid
+			rm_motor_pid_angle_x.calc(rm_motor_data_x.target_angle_set, rm_motor_x.angle);
+			rm_motor_data_x.target_speed_set = rm_motor_pid_angle_x.out;
+			rm_motor_pid_speed_x.calc(rm_motor_data_x.target_speed_set, rm_motor_x.speed);
+
+			float ffm_x = 0.0f;
+			if (fabsf(rm_motor_pid_speed_x.out) > 0.5f) {  // 目标速度够大才补偿
+				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.08f;
+			}
+
+			rm_motor_data_x.given_torque =
+				rm_motor_pid_speed_x.out + (-0.26f) * cosf(0.30f - imu.roll) + ffm_x;  //重力前馈
+		}
+		else if (remote.sw_r == sp::DBusSwitchMode::DOWN) {
+			rm_motor_data_x.given_torque = 0.0f;
+		}
+		else if (remote.sw_r == sp::DBusSwitchMode::UP) {
+			rm_motor_data_x.given_torque = 0.0f;
+		}
+
+		rm_motor_x.cmd(rm_motor_data_x.given_torque);
+		send_rm_motor();
 		osDelay(1);
 	}
 }
