@@ -27,12 +27,12 @@ extern volatile float pitch_acc;
 
 typedef struct
 {
-  float yaw;
-  float yaw_vel;
-  float yaw_acc;
-  float pitch;
-  float pitch_vel;
-  float pitch_acc;
+	float yaw;
+	float yaw_vel;
+	float yaw_acc;
+	float pitch;
+	float pitch_vel;
+	float pitch_acc;
 } TrajectoryPoint;
 
 void trajectory_task(void const * argument);
@@ -45,4 +45,4 @@ TrajectoryPoint trajectory_sample_at_ms(uint32_t elapsed_ms);
 }
 #endif
 
-#endif  // TRAJECTORY_TASK_HPP
+#endif	// TRAJECTORY_TASK_HPP

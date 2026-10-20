@@ -16,7 +16,7 @@ extern "C" void plot_task()
 			/*rm_motor_x.angle,
       rm_motor_x.speed,
       rm_motor_x.torque,*/
-			pitch - 0.35 /*+ 2.283f*/, imu.roll
+			imu.roll + 0.269f /* - 0.35*/, pitch, imu.roll - pitch
 			//sw_to_float(remote.sw_r)
 		);
 
