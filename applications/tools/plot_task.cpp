@@ -12,13 +12,9 @@ sp::Plotter plotter(&huart1);
 extern "C" void plot_task()
 {
 	while (1) {
-		plotter.plot(
-			/*rm_motor_x.angle,
-      rm_motor_x.speed,
-      rm_motor_x.torque,*/
-			imu.roll + 0.269f /* - 0.35*/, pitch, imu.roll - pitch
-			//sw_to_float(remote.sw_r)
-		);
+		plotter.plot(rm_motor_z.torque
+					 /*imu.roll + 0.269f, pitch, imu.roll - pitch*/
+					 /*gy56_dist_ok ? static_cast<float>(gy56_dist_cm) : -1.0f*/);
 
 		osDelay(5);
 	}

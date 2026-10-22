@@ -6,6 +6,7 @@ void can1_recv(uint32_t stamp_ms)
 	can1.recv();
 	if (can1.rx_id == rm_motor_x.rx_id) rm_motor_x.read(can1.rx_data, stamp_ms);
 	if (can1.rx_id == rm_motor_y.rx_id) rm_motor_y.read(can1.rx_data, stamp_ms);
+	if (can1.rx_id == rm_motor_z.rx_id) rm_motor_z.read(can1.rx_data, stamp_ms);
 	;
 }
 

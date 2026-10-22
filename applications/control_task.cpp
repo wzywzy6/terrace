@@ -918,18 +918,22 @@ extern "C" void control_task()
 
 GimbalData rm_motor_data_x;
 GimbalData rm_motor_data_y;
+GimbalData rm_motor_data_z;
 extern sp::Mahony imu;
 
 static constexpr float kPitchVelFf = 2.35f;
-static constexpr float kYawVelFf = 0.0f;
+static constexpr float kYawVelFf = 2.0f;
 static constexpr float kPitchAccFf = 0.0025f;
-static constexpr float kYawAccFf = 0.0f;
+static constexpr float kYawAccFf = 0.006f;
 
 static constexpr float kPitchBias = -4.00f;
 static constexpr float kYawBias = 0.0f;
 
 static constexpr float kPitchSign = 1.0f;
 static constexpr float kYawSign = 1.0f;
+float rm_motor_z_out_angle = rm_motor_z.angle / 36.0f;
+float rm_motor_z_out_speed = rm_motor_z.speed / 36.0f;
+float rm_motor_z_out_torgue = rm_motor_z.temperature * 36.0f;  //设置减速比
 
 /* ===== 新增:进入 MID 后先保持的时长 ===== */
 static constexpr uint32_t kStartupHoldMs = 500U;
@@ -938,9 +942,12 @@ sp::PID rm_motor_pid_angle_x(0.001f, 28.0f, 0.1f, 1.0f, 50.0f, 5.0f, 1.0f, true,
 sp::PID rm_motor_pid_speed_x(0.001f, 0.06f, 0.01f, 0.0f, 0.5f, 0.5f, 1.0f, false, true);
 sp::PID rm_motor_pid_angle_y(0.001f, 50.0f, 1.0f, 1.0f, 400.0f, 5.0f, 1.0f, true, true);
 sp::PID rm_motor_pid_speed_y(0.001f, 0.007f, 0.01f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
+sp::PID rm_motor_pid_angle_z(0.001f, 20.0f, 0.0f, 0.0f, 400.0f, 5.0f, 1.0f, true, true);
+sp::PID rm_motor_pid_speed_z(0.001f, 0.0002f, 0.0001f, 0.0f, 5.0f, 0.5f, 1.0f, false, true);
 
 extern "C" void control_task()
 {
+	gy56.begin();
 	remote.request();
 	osDelay(100);
 	can_start();
@@ -952,11 +959,33 @@ extern "C" void control_task()
 	/* ===== 新增:进入 MID 时刻与状态 ===== */
 	TickType_t mid_enter_tick = 0;
 	bool mid_active = false;
+	sp::DBusSwitchMode last_sw = sp::DBusSwitchMode::DOWN;
 
 	while (true) {
 		TrajectoryPoint traj = trajectory_read();
+		/* ---------- GY-56：只在这里处理一次 ---------- */
+		const uint32_t now_ms = osKernelSysTick();
+		gy56_dist_ok = gy56.is_alive(now_ms) && gy56.is_valid();
+		if (gy56_dist_ok) {
+			gy56_dist_cm = gy56.distance();
+		}
+		/* ------------------------------------------ */
+
+		const sp::DBusSwitchMode sw = remote.sw_r;
+
+		/* ===== 新增:挡位一变就先清 PID,避免切挡瞬间积分/微分突跳 ===== */
+		if (sw != last_sw) {
+			mid_active = false;
+
+			rm_motor_pid_angle_x.clear();
+			rm_motor_pid_speed_x.clear();
+			rm_motor_pid_angle_y.clear();
+			rm_motor_pid_speed_y.clear();
+			last_sw = sw;
+		}
 
 		if (remote.sw_r == sp::DBusSwitchMode::MID) {
+			rm_motor_data_z.given_torque = 0.05f;
 			/* ===== 新增:首次进入 MID 记录时刻 ===== */
 			const TickType_t now_tick = xTaskGetTickCount();
 			if (!mid_active) {
@@ -976,7 +1005,7 @@ extern "C" void control_task()
 			const float yaw_traj_acc = startup_hold ? 0.0f : traj.yaw_acc;
 
 			/* ---------- X 轴(pitch) ---------- */
-			const float pitch_target = kPitchBias + kPitchSign * pitch_traj_pos;
+			/*const float pitch_target = kPitchBias + kPitchSign * pitch_traj_pos;
 
 			rm_motor_pid_angle_x.calc(pitch_target, rm_motor_x.angle);
 			const float pitch_vel_ref =
@@ -990,7 +1019,7 @@ extern "C" void control_task()
 
 			rm_motor_data_x.given_torque = rm_motor_pid_speed_x.out +
 										   (-0.10f) * cosf(0.0f - imu.roll) + ffm_x +
-										   kPitchAccFf * kPitchSign * pitch_traj_acc;
+										   kPitchAccFf * kPitchSign * pitch_traj_acc;*/
 
 			/* ---------- Y 轴(yaw) ---------- */
 			/*const float yaw_target = kYawBias + kYawSign * yaw_traj_pos;
@@ -1004,10 +1033,20 @@ extern "C" void control_task()
                 rm_motor_pid_speed_y.out
                 + kYawAccFf * kYawSign * yaw_traj_acc;*/
 		}
+		if (remote.sw_r == sp::DBusSwitchMode::UP) {
+			rm_motor_data_z.target_angle_set = 5.0f * 36.0f;
+			rm_motor_data_z.target_speed_set = 0.0;
+
+			rm_motor_pid_angle_z.calc(rm_motor_data_z.target_angle_set, rm_motor_z.angle);
+			rm_motor_data_z.target_speed_set = rm_motor_pid_angle_z.out;
+			rm_motor_pid_speed_z.calc(rm_motor_data_z.target_speed_set, rm_motor_z.speed);
+			rm_motor_data_z.given_torque = rm_motor_pid_speed_z.out;
+		}
 		else {
 			mid_active = false; /* 退出 MID,下次进入重新计时 */
 			rm_motor_data_x.given_torque = 0.0f;
 			rm_motor_data_y.given_torque = 0.0f;
+			rm_motor_data_z.given_torque = 0.0f;
 			rm_motor_pid_angle_x.clear();
 			rm_motor_pid_speed_x.clear();
 			rm_motor_pid_angle_y.clear();
@@ -1016,6 +1055,8 @@ extern "C" void control_task()
 
 		rm_motor_x.cmd(rm_motor_data_x.given_torque);
 		rm_motor_y.cmd(rm_motor_data_y.given_torque);
+		rm_motor_z.cmd(rm_motor_data_z.given_torque);
+
 		send_rm_motor();
 		osDelay(1);
 	}
