@@ -7,7 +7,7 @@
 
 inline sp::RM_Motor rm_motor_x(1, sp::RM_Motors::GM6020);
 inline sp::RM_Motor rm_motor_y(4, sp::RM_Motors::GM6020);
-inline sp::RM_Motor rm_motor_z(3, sp::RM_Motors::M2006);
+inline sp::RM_Motor rm_motor_z(3, sp::RM_Motors::M2006, true);
 
 typedef struct
 {

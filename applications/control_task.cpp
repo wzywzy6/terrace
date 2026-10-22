@@ -934,7 +934,12 @@ static constexpr float kYawSign = 1.0f;
 float rm_motor_z_out_angle = rm_motor_z.angle / 36.0f;
 float rm_motor_z_out_speed = rm_motor_z.speed / 36.0f;
 float rm_motor_z_out_torgue = rm_motor_z.temperature * 36.0f;  //设置减速比
+//重力矩相关
+float g_torgue = 0.0f;
+float k1 = 0.0f, k2 = 0.0f, k3 = 0.0f;
 
+//
+float in_angle = 0.0f;
 /* ===== 新增:进入 MID 后先保持的时长 ===== */
 static constexpr uint32_t kStartupHoldMs = 500U;
 
@@ -971,38 +976,83 @@ extern "C" void control_task()
 		}
 		/* ------------------------------------------ */
 
+		if (imu.roll < 0) {
+			g_torgue =
+		}
 		const sp::DBusSwitchMode sw = remote.sw_r;
 
 		/* ===== 新增:挡位一变就先清 PID,避免切挡瞬间积分/微分突跳 ===== */
 		if (sw != last_sw) {
 			mid_active = false;
-
 			rm_motor_pid_angle_x.clear();
 			rm_motor_pid_speed_x.clear();
 			rm_motor_pid_angle_y.clear();
 			rm_motor_pid_speed_y.clear();
+			if (remote.sw_r == sp::DBusSwitchMode::UP) {
+				in_angle = rm_motor_z.angle;
+			}
+			if (remote.sw_r == sp::DBusSwitchMode::MID) {
+				rm_motor_pid_angle_x.calc(kPitchBias, rm_motor_x.angle);
+				rm_motor_data_x.target_speed_set = rm_motor_pid_angle_x.out;
+				rm_motor_pid_speed_x.calc(rm_motor_data_x.target_speed_set, rm_motor_x.speed);
+
+				float ffm_x = 0.0f;
+				if (fabsf(rm_motor_pid_speed_x.out) > 1.0f) {
+					ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
+				}
+
+				rm_motor_data_x.given_torque =
+					/*rm_motor_pid_speed_x.out*/ (
+						imu.roll > (-1.6f) ? (0.26f) * sinf(-1.4f - imu.roll) + ffm_x
+										   : (0.50f) * sinf(-1.4f - imu.roll) + ffm_x);
+			}
 			last_sw = sw;
 		}
 
 		if (remote.sw_r == sp::DBusSwitchMode::MID) {
-			rm_motor_data_z.given_torque = 0.05f;
+			rm_motor_pid_angle_x.calc(kPitchBias, rm_motor_x.angle);
+			rm_motor_data_x.target_speed_set = rm_motor_pid_angle_x.out;
+			rm_motor_pid_speed_x.calc(rm_motor_data_x.target_speed_set, rm_motor_x.speed);
+
+			float ffm_x = 0.0f;
+			if (fabsf(rm_motor_pid_speed_x.out) > 1.0f) {
+				ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
+			}
+
+			rm_motor_data_x.given_torque =
+				/*rm_motor_pid_speed_x.out*/ (
+					imu.roll > (-1.07f) ? (0.35f) * sinf(-1.07f - imu.roll) + ffm_x
+										: (0.30f) * sinf(-1.07f - imu.roll) + ffm_x);
 			/* ===== 新增:首次进入 MID 记录时刻 ===== */
-			const TickType_t now_tick = xTaskGetTickCount();
+			/*const TickType_t now_tick = xTaskGetTickCount();
 			if (!mid_active) {
 				mid_enter_tick = now_tick;
 				mid_active = true;
 			}
-			// const uint32_t elapsed_ms = pdTICKS_TO_MS(now_tick - mid_enter_tick);   // 删
+			
 			const uint32_t elapsed_ms =
 				static_cast<uint32_t>(now_tick - mid_enter_tick);  // tick==ms @1kHz
 			const bool startup_hold = (elapsed_ms < kStartupHoldMs);
-			/* 保持期内:轨迹贡献为 0,只保留初始位置 */
 			const float pitch_traj_pos = startup_hold ? 0.0f : traj.pitch;
 			const float pitch_traj_vel = startup_hold ? 0.0f : traj.pitch_vel;
 			const float pitch_traj_acc = startup_hold ? 0.0f : traj.pitch_acc;
 			const float yaw_traj_pos = startup_hold ? 0.0f : traj.yaw;
 			const float yaw_traj_vel = startup_hold ? 0.0f : traj.yaw_vel;
-			const float yaw_traj_acc = startup_hold ? 0.0f : traj.yaw_acc;
+			const float yaw_traj_acc = startup_hold ? 0.0f : traj.yaw_acc;*/
+
+			/*if (gy56_dist_cm <= 5.0f) {
+				rm_motor_pid_angle_x.calc(0.0f, rm_motor_x.angle);
+				rm_motor_data_x.target_speed_set = rm_motor_pid_angle_x.out;
+				rm_motor_pid_speed_x.calc(rm_motor_data_x.target_speed_set, rm_motor_x.speed);
+
+				float ffm_x = 0.0f;
+				if (fabsf(rm_motor_pid_speed_x.out) > 1.0f) {
+					ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
+				}
+
+				rm_motor_data_x.given_torque =
+					rm_motor_pid_speed_x.out + (-0.26f) * cosf(0.30f - imu.roll) + ffm_x;
+		}*/
 
 			/* ---------- X 轴(pitch) ---------- */
 			/*const float pitch_target = kPitchBias + kPitchSign * pitch_traj_pos;
@@ -1033,9 +1083,9 @@ extern "C" void control_task()
                 rm_motor_pid_speed_y.out
                 + kYawAccFf * kYawSign * yaw_traj_acc;*/
 		}
-		if (remote.sw_r == sp::DBusSwitchMode::UP) {
-			rm_motor_data_z.target_angle_set = 5.0f * 36.0f;
-			rm_motor_data_z.target_speed_set = 0.0;
+		else if (remote.sw_r == sp::DBusSwitchMode::UP) {
+			rm_motor_data_z.target_angle_set = 2.0f * 36.0f + in_angle;
+			rm_motor_data_z.target_speed_set = 0.0f;
 
 			rm_motor_pid_angle_z.calc(rm_motor_data_z.target_angle_set, rm_motor_z.angle);
 			rm_motor_data_z.target_speed_set = rm_motor_pid_angle_z.out;

@@ -63,7 +63,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     applications/tools/plot_task.cpp
 
     applications/pid_train/pid_train.cpp
-
+applications/io/gy56/gy56.cpp
     applications/data_interfaces/can/can.cpp
     applications/data_interfaces/can/can_recv.cpp
     applications/data_interfaces/uart/uart_recv.cpp

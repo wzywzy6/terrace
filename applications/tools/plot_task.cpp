@@ -6,14 +6,15 @@
 
 extern sp::Mahony imu;	// ← 声明外部对象
 extern volatile float pitch;
+extern GimbalData rm_motor_data_z;
 
 sp::Plotter plotter(&huart1);
 
 extern "C" void plot_task()
 {
 	while (1) {
-		plotter.plot(rm_motor_z.torque
-					 /*imu.roll + 0.269f, pitch, imu.roll - pitch*/
+		plotter.plot(imu.roll  //rm_motor_data_z.target_angle_set
+							   /*imu.roll + 0.269f, pitch, imu.roll - pitch*/
 					 /*gy56_dist_ok ? static_cast<float>(gy56_dist_cm) : -1.0f*/);
 
 		osDelay(5);
