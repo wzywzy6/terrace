@@ -48,7 +48,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     sp_middleware/io/buzzer/buzzer.cpp
     sp_middleware/io/can/can.cpp
     sp_middleware/io/dbus/dbus.cpp
-    sp_middleware/io/gy56/gy56.cpp
+    # sp_middleware/io/gy56/gy56.cpp 和 applications/io/gy56/gy56.cpp 是同一份实现，
+    # 同时编译会 multiple definition；uart.hpp 走的是 applications 那份头文件，所以只编译它。
     sp_middleware/io/led/led.cpp
     sp_middleware/io/plotter/plotter.cpp
     sp_middleware/io/ws2812/ws2812.cpp
@@ -63,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     applications/control_task.cpp
     applications/tools/plot_task.cpp
     applications/tools/detect.cpp
+    applications/tools/obstacle_guard.cpp
 
     applications/pid_train/pid_train.cpp
     applications/io/gy56/gy56.cpp

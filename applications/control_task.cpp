@@ -208,6 +208,7 @@ extern "C" void control_task()
 #include "task.h"
 #include "tools/detect.hpp"
 #include "tools/mahony/mahony.hpp"
+#include "tools/obstacle_guard.hpp"
 #include "tools/pid/pid.hpp"
 #include "trajectory_task.hpp"
 
@@ -216,11 +217,8 @@ GimbalData rm_motor_data_y;
 GimbalData rm_motor_data_z;
 extern sp::Mahony imu;
 
-/* ===== 红外触发状态 ===== */
-static bool pitch_locked = false;	  // false=锁定保持 kPitchBias；true=已检测到 <3cm 解锁
-static uint8_t dist_confirm_cnt = 0;  // 连续确认计数，做防抖
-static constexpr float kDistTriggerCm = 10.0f;	// 触发距离
-static constexpr uint8_t kDistConfirmN = 3;		// 连续 3 拍确认（1kHz 下约 3ms）
+/* ===== 避障决策模块：纯逻辑，不碰电机、不建任务 ===== */
+static ObstacleGuard obstacle_guard;
 
 /*前馈增益*/
 static constexpr float kPitchVelFf = 1.0f;	//参考速度放大多少倍
@@ -283,16 +281,13 @@ extern "C" void control_task()
 
 	rm_motor_data_x.given_torque = 0.0f;
 	rm_motor_data_y.given_torque = 0.0f;
+	rm_motor_data_z.given_torque = 0.0f;
 
 	/* ===== 新增:进入 MID 时刻与状态 ===== */
 	TickType_t mid_enter_tick = 0;
 	bool mid_active = false;
-	/* ===== 新增:进入 UP(调重力)挡位时刻与状态 ===== */
-	TickType_t up_enter_tick = 0;
-	bool up_active = false;
 	/* ===== 新增:上一拍的挡位,用于识别挡位切换 ===== */
 	sp::DBusSwitchMode last_sw = sp::DBusSwitchMode::DOWN;
-	uint32_t tick_ms = 0;  // 避障之后恢复原来位置毫秒计数
 	while (true) {
 		/*调用*/
 		yaw_detect(
@@ -317,85 +312,44 @@ extern "C" void control_task()
 		/* ===== 新增:挡位一变就先清 PID,避免切挡瞬间积分/微分突跳 ===== */
 		if (sw != last_sw) {
 			mid_active = false;
-			up_active = false;
 			rm_motor_pid_angle_x.clear();
 			rm_motor_pid_speed_x.clear();
 			rm_motor_pid_angle_y.clear();
 			rm_motor_pid_speed_y.clear();
-			if (sw == sp::DBusSwitchMode::UP) {
-				mid_enter_tick = xTaskGetTickCount();
-				mid_active = true;
-				pitch_locked = false;  // 每次进 UP 重新锁定
-				dist_confirm_cnt = 0;
-			}
+			rm_motor_pid_angle_z.clear();
+			rm_motor_pid_speed_z.clear();
+			obstacle_guard.reset();	 // 换挡一律回 NORMAL
 			last_sw = sw;
 		}
 
 		if (sw == sp::DBusSwitchMode::UP) {
-			rm_motor_data_z.target_angle_set = -imu.roll * 36.0f;
-			rm_motor_data_z.target_speed_set = 0.0f;
+			/* ---- 1. 避障决策：唯一入口，1kHz 调用 ---- */
+			obstacle_guard.update(gy56_dist_ok, gy56_dist_cm, gy56.last_update_ms(), now_ms);
+
+			/* ---- 2. X 轴：目标由避障模块整形，一次 PID ---- */
+			float x_vel_ff = 0.0f;
+			const float x_target = obstacle_guard.apply(kPitchBias, 0.001f, x_vel_ff);
+
+			rm_motor_pid_angle_x.calc(x_target, rm_motor_x.angle);
+			const float x_ref = rm_motor_pid_angle_x.out + x_vel_ff;
+			rm_motor_pid_speed_x.calc(x_ref, rm_motor_x.speed);
+
+			float ffm_x = 0.0f;
+			if (fabsf(x_ref) > 4.0f) {
+				ffm_x = (x_ref > 0 ? 1.0f : -1.0f) * 0.02f;
+			}
+
+			rm_motor_data_x.given_torque =
+				rm_motor_pid_speed_x.out + pitch_gravity_torque() + ffm_x;
+
+			/* ---- 3. Z 轴：roll 调平 + 折叠瞄准补偿 ---- */
+			rm_motor_data_z.target_angle_set =
+				-imu.roll * 36.0f + obstacle_guard.z_comp_motor();
 
 			rm_motor_pid_angle_z.calc(rm_motor_data_z.target_angle_set, rm_motor_z.angle);
-			rm_motor_data_z.target_speed_set = rm_motor_pid_angle_z.out;
-			rm_motor_pid_speed_z.calc(rm_motor_data_z.target_speed_set, rm_motor_z.speed);
-			rm_motor_data_z.given_torque = rm_motor_pid_speed_z.out;  //2006电机跟随
-			/* ---------- 红外判定：连续 N 拍 <3cm 才解锁，防抖 ---------- */
-			if (!pitch_locked) {
-				if (gy56_dist_ok && gy56_dist_cm < kDistTriggerCm) {  //解锁条件
-					if (dist_confirm_cnt < kDistConfirmN) dist_confirm_cnt++;
-					if (dist_confirm_cnt >= kDistConfirmN) {
-						pitch_locked = true;  // 触发解锁
-						tick_ms = 0;		  //触发避障时计时归零
-					}
-				}
-				else {
-					dist_confirm_cnt = 0;  // 距离回弹或数据无效，重新计数
-				}
-			}
-
-			if (!pitch_locked) {
-				/* 锁定阶段：一直保持 kPitchBias，不叠加轨迹 */
-				rm_motor_pid_angle_x.calc(kPitchBias, rm_motor_x.angle);
-				rm_motor_pid_speed_x.calc(rm_motor_pid_angle_x.out, rm_motor_x.speed);
-
-				float ffm_x = 0.0f;
-				if (fabsf(rm_motor_pid_speed_x.out) > 4.0f) {
-					ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
-				}
-
-				rm_motor_data_x.given_torque =
-					rm_motor_pid_speed_x.out + pitch_gravity_torque() + ffm_x;
-			}
-			else { /* 已检测到 <3cm：触发避障 */
-
-				tick_ms++;
-				rm_motor_pid_angle_x.calc(-3.50f, rm_motor_x.angle);
-				rm_motor_pid_speed_x.calc(rm_motor_pid_angle_x.out, rm_motor_x.speed);
-
-				float ffm_x = 0.0f;
-				if (fabsf(rm_motor_pid_speed_x.out) > 4.0f) {
-					ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
-				}
-
-				rm_motor_data_x.given_torque =
-					rm_motor_pid_speed_x.out + pitch_gravity_torque() + ffm_x;
-				if (tick_ms >= 3000 && tick_ms <= 6000)	 //避障3秒后，复位
-				{
-					rm_motor_pid_angle_x.calc(kPitchBias, rm_motor_x.angle);
-					rm_motor_pid_speed_x.calc(rm_motor_pid_angle_x.out, rm_motor_x.speed);
-
-					float ffm_x = 0.0f;
-					if (fabsf(rm_motor_pid_speed_x.out) > 4.0f) {
-						ffm_x = (rm_motor_pid_speed_x.out > 0 ? 1.0f : -1.0f) * 0.02f;
-					}
-
-					rm_motor_data_x.given_torque =
-						rm_motor_pid_speed_x.out + pitch_gravity_torque() + ffm_x;
-				}
-				if (tick_ms >= 6000)  //避障6秒后，追踪轨迹
-				{
-				}
-			}
+			const float z_ref = rm_motor_pid_angle_z.out + obstacle_guard.z_vel_ff_motor();
+			rm_motor_pid_speed_z.calc(z_ref, rm_motor_z.speed);
+			rm_motor_data_z.given_torque = rm_motor_pid_speed_z.out;
 		}
 		else if (sw == sp::DBusSwitchMode::MID) {
 			const TickType_t now_tick = xTaskGetTickCount();
@@ -437,6 +391,8 @@ extern "C" void control_task()
 			rm_motor_data_y.given_torque =
 				rm_motor_pid_speed_y.out + kYawAccFf * kYawSign * yaw_traj_acc;
 #endif
+			/* z 轴在轨迹挡不参与，清零，避免沿用 UP 挡最后一拍的力矩 */
+			rm_motor_data_z.given_torque = 0.0f;
 		}
 
 		else {
