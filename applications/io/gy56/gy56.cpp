@@ -4,11 +4,12 @@ namespace sp
 {
 namespace
 {
-constexpr uint8_t kHeadByte = 0x5A;			 // 帧头
-constexpr uint8_t kTypeByte = 0x15;			 // 本帧数据类型
-constexpr uint8_t kMinDataLen = 3;			 // 距离(2) + 模式(1)
-constexpr uint8_t kMaxDataLen = 4;			 // 距离(2) + 模式(1) + 温度(1)
-constexpr uint16_t kInvalidDistance = 8000;	 // 超量程时模块会给出 8190 一类的值
+constexpr uint8_t kHeadByte = 0x5A;		  // 帧头
+constexpr uint8_t kTypeByte = 0x15;		  // 本帧数据类型
+constexpr uint8_t kMinDataLen = 3;		  // 距离(2) + 模式(1)
+constexpr uint8_t kMaxDataLen = 4;		  // 距离(2) + 模式(1) + 温度(1)
+constexpr uint16_t kMinDistanceCm = 3;	  // 小于最小测距距离按“错误值”处理（无回波可能给 1~2）
+constexpr uint16_t kMaxDistanceCm = 350;  // 按当前传感器实测约 3.5m 限制有效量程
 }  // namespace
 
 GY56::GY56(UART_HandleTypeDef * huart)
@@ -19,8 +20,10 @@ GY56::GY56(UART_HandleTypeDef * huart)
   mode_(0),
   temperature_(0),
   valid_(false),
+  out_of_range_(false),
   has_read_(false),
-  last_update_ms_(0)
+  last_update_ms_(0),
+  last_frame_ms_(0)
 {
 }
 
@@ -121,24 +124,32 @@ void GY56::update(uint16_t size, uint32_t stamp_ms)
 		for (uint8_t k = 0; k + 1 < frame_len_; ++k) sum = static_cast<uint8_t>(sum + frame_[k]);
 
 		if (sum == frame_[frame_len_ - 1]) {
+			has_read_ = true;
+			last_frame_ms_ = stamp_ms;
 			const uint16_t dist = static_cast<uint16_t>((frame_[4] << 8) | frame_[5]);
-			if (dist != 0 && dist < kInvalidDistance) {
+			if (dist >= kMinDistanceCm && dist <= kMaxDistanceCm) {
 				distance_ = dist;
 				mode_ = frame_[6];
 				if (frame_len_ == 9) temperature_ = static_cast<int8_t>(frame_[7]);
 				valid_ = true;
-				has_read_ = true;
+				out_of_range_ = false;
 				last_update_ms_ = stamp_ms;
 			}
 			else {
-				valid_ = false;	 // 超出量程 / 无回波
+				valid_ = false;		   // 错误值(0/1/2) / 超出量程 / 无回波
+				out_of_range_ = true;  // 帧本身是好的，只是这一帧没有可信距离
 			}
+		}
+		else {
+			// 校验失败：只打断“有效”标记，不改 out_of_range_。
+			// 坏帧既不能算“远”也不能算“近”，掉线由 is_alive() 判定。
+			valid_ = false;
 		}
 
 		index_ = 0;
 	}
 }
 
-bool GY56::is_alive(uint32_t now_ms) const { return has_read_ && (now_ms - last_update_ms_ < 200); }
+bool GY56::is_alive(uint32_t now_ms) const { return has_read_ && (now_ms - last_frame_ms_ < 200); }
 
 }  // namespace sp

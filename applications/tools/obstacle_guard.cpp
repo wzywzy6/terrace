@@ -41,54 +41,79 @@ void ObstacleGuard::reset()
 	settle_ms_ = 0.0f;
 
 	sensor_lost_ = false;
+	measurement_valid_ = false;
 	z_comp_motor_ = 0.0f;
 	z_vel_ff_motor_ = 0.0f;
+
+	now_ms_ = 0;
+	invalid_active_ = false;
+	invalid_since_ms_ = 0;
+	invalid_release_ = false;
+	rearm_active_ = false;
+	rearm_ms_ = 0;
 
 	// last_stamp_ 故意不清零：清掉会让“没有新帧”被误判成新帧
 }
 
 void ObstacleGuard::update(bool dist_ok, uint16_t dist_cm, uint32_t stamp_ms, uint32_t now_ms)
 {
+	now_ms_ = now_ms;
 	const bool new_frame = (stamp_ms != last_stamp_);
+	last_stamp_ = stamp_ms;
+	sensor_lost_ = ((now_ms - stamp_ms) >= cfg_.sensor_timeout_ms);
 
-	if (new_frame) {
-		last_stamp_ = stamp_ms;
+	measurement_valid_ = dist_ok && !sensor_lost_ && (dist_cm != 0);
 
-		/* 驱动只在“有效帧”上更新 last_update_ms，所以这里基本恒为 true；
-		   保留判断是为了将来换驱动时不把无效值当中值用 */
-		if (dist_ok) {
-			const float d = static_cast<float>(dist_cm);
+	// 只要这一拍没有可信距离，就累计“错误时间”。
+	// 不依赖是否收到帧、也不依赖超量程标记：掉线、校验错、1~2cm 错误值都照样累计。
+	if (measurement_valid_) {
+		invalid_active_ = false;
+	}
+	else if (!invalid_active_) {
+		invalid_active_ = true;
+		invalid_since_ms_ = now_ms;
+	}
+	invalid_release_ = cfg_.invalid_release_enable && invalid_active_ &&
+					   ((now_ms - invalid_since_ms_) >= cfg_.invalid_release_ms);
 
-			if (!med_init_) {
-				med_[0] = med_[1] = med_[2] = d;
-				med_init_ = true;
-			}
-			else {
-				med_[2] = med_[1];
-				med_[1] = med_[0];
-				med_[0] = d;
-			}
-
-			last_med_ = median3(med_[0], med_[1], med_[2]);
-
-			if (last_med_ < cfg_.trig_cm) {
-				if (below_cnt_ < 255) below_cnt_++;
-			}
-			else {
-				below_cnt_ = 0;
-			}
-
-			if (last_med_ > cfg_.rel_cm) {
-				if (above_cnt_ < 255) above_cnt_++;
-			}
-			else {
-				above_cnt_ = 0;
-			}
-		}
+	// 无效帧和断流都打断连续判据；恢复后从第一帧重新初始化中值滤波。
+	// 必须在 new_frame 判断外处理：超时发生时并没有新帧。
+	if (!measurement_valid_) {
+		below_cnt_ = 0;
+		above_cnt_ = 0;
+		med_init_ = false;
+		last_med_ = 0.0f;
+		return;
 	}
 
-	/* 超过超时才叫“丢失”；数据无效但仍新鲜时只是不更新计数 */
-	sensor_lost_ = !dist_ok && ((now_ms - last_stamp_) > cfg_.sensor_timeout_ms);
+	if (!new_frame) return;
+	const float d = static_cast<float>(dist_cm);
+
+	if (!med_init_) {
+		med_[0] = med_[1] = med_[2] = d;
+		med_init_ = true;
+	}
+	else {
+		med_[2] = med_[1];
+		med_[1] = med_[0];
+		med_[0] = d;
+	}
+
+	last_med_ = median3(med_[0], med_[1], med_[2]);
+
+	if (last_med_ < cfg_.trig_cm) {
+		if (below_cnt_ < 255) below_cnt_++;
+	}
+	else {
+		below_cnt_ = 0;
+	}
+
+	if (last_med_ > cfg_.rel_cm) {
+		if (above_cnt_ < 255) above_cnt_++;
+	}
+	else {
+		above_cnt_ = 0;
+	}
 }
 
 float ObstacleGuard::apply(float normal_target, float dt, float & vel_ff)
@@ -104,7 +129,12 @@ float ObstacleGuard::apply(float normal_target, float dt, float & vel_ff)
 	/* ===== 1. 状态迁移（只在这里做，保证和整形同拍）===== */
 	switch (state_) {
 		case State::NORMAL:
-			if (below_cnt_ >= cfg_.trig_frames) {
+			// 无回波抬回后的冷静期：防止“折叠位看不到目标”时折-抬-折反复
+			if (rearm_active_ && ((now_ms_ - rearm_ms_) >= cfg_.fold_rearm_ms)) {
+				rearm_active_ = false;
+				below_cnt_ = 0;	 // 冷静期里攒下的近距帧不算数，必须冷静期后重新确认
+			}
+			if (measurement_valid_ && (below_cnt_ >= cfg_.trig_frames) && !rearm_active_) {
 				state_ = State::LOWERING;
 				hold_ms_ = 0.0f;
 				settle_ms_ = 0.0f;
@@ -122,16 +152,30 @@ float ObstacleGuard::apply(float normal_target, float dt, float & vel_ff)
 			}
 			break;
 
-		case State::LOWERED:
+		case State::LOWERED: {
 			hold_ms_ += dt_ms;
 			settle_ms_ += dt_ms;
-			if (!sensor_lost_ && (above_cnt_ >= cfg_.rel_frames) &&
-				(hold_ms_ >= static_cast<float>(cfg_.min_hold_ms)) &&
-				(settle_ms_ >= static_cast<float>(cfg_.aim_settle_ms))) {
+
+			const bool settled = (settle_ms_ >= static_cast<float>(cfg_.aim_settle_ms));
+			const bool far_release =
+				measurement_valid_ && (above_cnt_ >= cfg_.rel_frames) &&
+				(hold_ms_ >= static_cast<float>(cfg_.min_hold_ms)) && settled;
+			const bool invalid_release =
+				invalid_release_ &&
+				(hold_ms_ >= static_cast<float>(cfg_.fold_lockout_ms)) && settled;
+
+			if (far_release) {
 				state_ = State::RAISING;
 				above_cnt_ = 0;
 			}
+			else if (invalid_release) {
+				state_ = State::RAISING;
+				above_cnt_ = 0;
+				rearm_active_ = true;
+				rearm_ms_ = now_ms_;
+			}
 			break;
+		}
 
 		case State::RAISING:
 			if (std::fabs(shaped_ - normal_target) < cfg_.done_tol) {

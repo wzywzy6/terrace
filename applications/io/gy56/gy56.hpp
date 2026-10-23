@@ -45,11 +45,14 @@ class GY56
 
 	bool is_alive(uint32_t now_ms) const;
 	bool is_valid() const { return valid_; }
+	// 最近一帧校验通过、但距离不在有效量程内（超量程/无回波）
+	bool out_of_range() const { return out_of_range_; }
 
 	uint16_t distance() const { return distance_; }	 // 单位: cm
 	uint8_t mode() const { return mode_; }			 // 模块测量模式
 	int8_t temperature() const { return temperature_; }
-	uint32_t last_update_ms() const { return last_update_ms_; }
+	uint32_t last_update_ms() const { return last_update_ms_; }  // 最近有效距离
+	uint32_t last_frame_ms() const { return last_frame_ms_; }    // 最近校验通过的帧，含超量程
 
   private:
 	UART_HandleTypeDef * huart_;
@@ -64,8 +67,10 @@ class GY56
 	int8_t temperature_;
 
 	bool valid_;
+	bool out_of_range_;
 	bool has_read_;
 	uint32_t last_update_ms_;
+	uint32_t last_frame_ms_;
 };
 
 }  // namespace sp
