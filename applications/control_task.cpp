@@ -18,15 +18,16 @@ GimbalData rm_motor_data_y;
 GimbalData rm_motor_data_z;
 extern sp::Mahony imu;
 
-static constexpr float kPitchVelFf = 2.35f;
-static constexpr float kYawVelFf = 2.0f;
-static constexpr float kPitchAccFf = 0.0025f;
-static constexpr float kYawAccFf = 0.006f;
+/*前馈增益*/
+static constexpr float kPitchVelFf = 2.35f;	 //参考速度放大多少倍
+static constexpr float kYawVelFf = 0.003f;
+static constexpr float kPitchAccFf = 0.0025f;  //参考加速度要乘多大惯量变成力矩 kg*m^2
+static constexpr float kYawAccFf = 0.0f;
 
-static constexpr float kPitchBias = -4.00f;
+static constexpr float kPitchBias = -4.00f;	 //绝对目标角 rad
 static constexpr float kYawBias = 0.0f;
 
-static constexpr float kPitchSign = 1.0f;
+static constexpr float kPitchSign = 1.0f;  //方向标定（电机与机构正方向比例）
 static constexpr float kYawSign = 1.0f;
 float rm_motor_z_out_angle = rm_motor_z.angle / 36.0f;
 float rm_motor_z_out_speed = rm_motor_z.speed / 36.0f;
@@ -51,6 +52,7 @@ extern "C" void control_task()
 {
 	gy56.begin();
 	remote.request();
+	gy56.begin();
 	osDelay(100);
 	can_start();
 	osDelay(100);
@@ -61,6 +63,10 @@ extern "C" void control_task()
 	/* ===== 新增:进入 MID 时刻与状态 ===== */
 	TickType_t mid_enter_tick = 0;
 	bool mid_active = false;
+	/* ===== 新增:进入 UP(调重力)挡位时刻与状态 ===== */
+	TickType_t up_enter_tick = 0;
+	bool up_active = false;
+	/* ===== 新增:上一拍的挡位,用于识别挡位切换 ===== */
 	sp::DBusSwitchMode last_sw = sp::DBusSwitchMode::DOWN;
 
 	while (true) {

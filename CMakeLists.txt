@@ -48,6 +48,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     sp_middleware/io/buzzer/buzzer.cpp
     sp_middleware/io/can/can.cpp
     sp_middleware/io/dbus/dbus.cpp
+    sp_middleware/io/gy56/gy56.cpp
     sp_middleware/io/led/led.cpp
     sp_middleware/io/plotter/plotter.cpp
     sp_middleware/io/ws2812/ws2812.cpp
