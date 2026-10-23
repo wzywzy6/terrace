@@ -19,5 +19,6 @@ typedef struct
 // GY-56 的处理结果：control_task 写，plot_task 只读，保证两边是同一份数据
 inline uint16_t gy56_dist_cm = 0;  // 单位 cm，控制实际使用的值
 inline bool gy56_dist_ok = false;  // 最近一帧是否有效
+float Fsign(float fsign);
 
 #endif	// CONTROL_TASK_HPP
