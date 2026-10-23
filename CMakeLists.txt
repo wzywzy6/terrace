@@ -61,9 +61,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     applications/io/led_task.cpp
     applications/control_task.cpp
     applications/tools/plot_task.cpp
+    applications/tools/detect.cpp
 
     applications/pid_train/pid_train.cpp
-applications/io/gy56/gy56.cpp
+    applications/io/gy56/gy56.cpp
     applications/data_interfaces/can/can.cpp
     applications/data_interfaces/can/can_recv.cpp
     applications/data_interfaces/uart/uart_recv.cpp

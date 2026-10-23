@@ -6,6 +6,10 @@
 
 extern sp::Mahony imu;	// ← 声明外部对象
 extern volatile float pitch;
+extern volatile float yaw;
+extern volatile float yaw_ratio;
+extern volatile float pitch_ratio;
+extern volatile float imu_last_yaw;
 extern GimbalData rm_motor_data_z;
 
 sp::Plotter plotter(&huart1);
@@ -13,9 +17,12 @@ sp::Plotter plotter(&huart1);
 extern "C" void plot_task()
 {
 	while (1) {
-		plotter.plot(imu.roll  //rm_motor_data_z.target_angle_set
-							   /*imu.roll + 0.269f, pitch, imu.roll - pitch*/
-					 /*gy56_dist_ok ? static_cast<float>(gy56_dist_cm) : -1.0f*/);
+		plotter.plot(
+			imu.yaw - imu_last_yaw, yaw, imu.yaw - imu_last_yaw - yaw
+			//yaw_ratio
+			//rm_motor_data_z.target_angle_set
+			/*pitch_ratio, imu.roll + 0.269f + 0.023f, pitch, imu.roll - pitch*/
+			/*gy56_dist_ok ? static_cast<float>(gy56_dist_cm) : -1.0f*/);
 
 		osDelay(5);
 	}
