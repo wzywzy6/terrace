@@ -18,8 +18,8 @@ extern "C" void plot_task()
 {
 	while (1) {
 		plotter.plot(
-			imu.yaw - imu_last_yaw, yaw, imu.yaw - imu_last_yaw - yaw
-			//yaw_ratio
+			yaw_ratio, yaw, imu.yaw - imu_last_yaw,
+			gy56_dist_ok ? static_cast<float>(gy56_dist_cm) : -1.0f
 			//rm_motor_data_z.target_angle_set
 			/*pitch_ratio, imu.roll + 0.269f + 0.023f, pitch, imu.roll - pitch*/
 			/*gy56_dist_ok ? static_cast<float>(gy56_dist_cm) : -1.0f*/);
